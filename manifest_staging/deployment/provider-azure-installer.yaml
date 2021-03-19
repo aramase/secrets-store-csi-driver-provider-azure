@@ -2,6 +2,31 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: csi-secrets-store-provider-azure
+  namespace: kube-system
+---
+kind: Role
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: csi-secrets-store-provider-azure
+  namespace: kube-system
+rules:
+- apiGroups: ["clusterconfig.azure.com"]
+  resources: ["azureclusteridentityrequests", "azureclusteridentityrequests/status"]
+  verbs: ["get", "list", "create", "update", "patch"]
+---
+kind: RoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: csi-secrets-store-provider-azure
+  namespace: kube-system
+subjects:
+- kind: ServiceAccount
+  name: csi-secrets-store-provider-azure
+  namespace: kube-system
+roleRef:
+  kind: Role
+  name: csi-secrets-store-provider-azure
+  apiGroup: rbac.authorization.k8s.io
 ---
 apiVersion: apps/v1
 kind: DaemonSet

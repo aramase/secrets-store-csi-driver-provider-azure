@@ -1,0 +1,7 @@
+domain: azure.com
+repo: github.com/Azure/ClusterConfigurationAgent/test
+resources:
+- group: clusterconfig
+  kind: ExtensionConfig
+  version: v1beta1
+version: "2"

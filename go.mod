@@ -3,9 +3,11 @@ module github.com/Azure/secrets-store-csi-driver-provider-azure
 go 1.16
 
 require (
+	github.com/Azure/ClusterConfigurationAgent/LogHelper v0.0.0 // indirect
+	github.com/Azure/ClusterConfigurationAgent/Utils v0.0.0
 	github.com/Azure/azure-sdk-for-go v52.4.0+incompatible
 	github.com/Azure/go-autorest/autorest v0.9.6
-	github.com/Azure/go-autorest/autorest/adal v0.8.2
+	github.com/Azure/go-autorest/autorest/adal v0.9.3
 	github.com/Azure/go-autorest/autorest/to v0.4.0 // indirect
 	github.com/Azure/go-autorest/autorest/validation v0.3.1 // indirect
 	github.com/google/go-cmp v0.5.2
@@ -19,4 +21,9 @@ require (
 	k8s.io/component-base v0.19.3
 	k8s.io/klog/v2 v2.5.0
 	sigs.k8s.io/secrets-store-csi-driver v0.0.20
+)
+
+replace (
+	github.com/Azure/ClusterConfigurationAgent/LogHelper v0.0.0 => ./pkg/tokenutils/vendor/github.com/Azure/ClusterConfigurationAgent/LogHelper
+	github.com/Azure/ClusterConfigurationAgent/Utils v0.0.0 => ./pkg/tokenutils/vendor/github.com/Azure/ClusterConfigurationAgent/Utils
 )

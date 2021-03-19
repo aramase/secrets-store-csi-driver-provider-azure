@@ -169,7 +169,7 @@ func (p *Provider) getVaultURL(ctx context.Context) (vaultURL *string, err error
 }
 
 // GetServicePrincipalToken creates a new service principal token based on the configuration
-func (p *Provider) GetServicePrincipalToken(resource string) (*adal.ServicePrincipalToken, error) {
+func (p *Provider) GetServicePrincipalToken(resource string) (adal.OAuthTokenProvider, error) {
 	return p.AuthConfig.GetServicePrincipalToken(p.PodName, p.PodNamespace, resource, p.AzureCloudEnvironment.ActiveDirectoryEndpoint, p.TenantID, podIdentityNMIPort)
 }
 
@@ -180,6 +180,7 @@ func (p *Provider) MountSecretsStoreObjectContent(ctx context.Context, attrib ma
 	usePodIdentityStr := strings.TrimSpace(attrib["usePodIdentity"])
 	useVMManagedIdentityStr := strings.TrimSpace(attrib["useVMManagedIdentity"])
 	userAssignedIdentityID := strings.TrimSpace(attrib["userAssignedIdentityID"])
+	useClusterIdentityStr := strings.TrimSpace(attrib["useClusterIdentity"])
 	tenantID := strings.TrimSpace(attrib["tenantId"])
 	cloudEnvFileName := strings.TrimSpace(attrib["cloudEnvFileName"])
 	p.PodName = strings.TrimSpace(attrib["csi.storage.k8s.io/pod.name"])
@@ -205,6 +206,13 @@ func (p *Provider) MountSecretsStoreObjectContent(ctx context.Context, attrib ma
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse useVMManagedIdentity flag, error: %+v", err)
 	}
+	if len(useClusterIdentityStr) == 0 {
+		useClusterIdentityStr = "false"
+	}
+	useClusterIdentity, err := strconv.ParseBool(useClusterIdentityStr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse useClusterIdentity flag, error: %+v", err)
+	}
 
 	err = setAzureEnvironmentFilePath(cloudEnvFileName)
 	if err != nil {
@@ -215,7 +223,7 @@ func (p *Provider) MountSecretsStoreObjectContent(ctx context.Context, attrib ma
 		return nil, fmt.Errorf("cloudName %s is not valid, error: %v", cloudName, err)
 	}
 
-	p.AuthConfig, err = auth.NewConfig(usePodIdentity, useVMManagedIdentity, userAssignedIdentityID, secrets)
+	p.AuthConfig, err = auth.NewConfig(usePodIdentity, useVMManagedIdentity, useClusterIdentity, userAssignedIdentityID, secrets)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create auth config, error: %+v", err)
 	}

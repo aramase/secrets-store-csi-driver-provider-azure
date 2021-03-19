@@ -9,6 +9,7 @@ import (
 
 	"github.com/Azure/secrets-store-csi-driver-provider-azure/pkg/utils"
 
+	tokenUtils "github.com/Azure/ClusterConfigurationAgent/Utils"
 	"github.com/Azure/go-autorest/autorest/adal"
 	"github.com/pkg/errors"
 	"k8s.io/klog/v2"
@@ -39,17 +40,19 @@ type Config struct {
 	// AADClientSecret is the client secret for SP access mode
 	AADClientSecret string
 	// AADClientID is the clientID for SP access mode
-	AADClientID string
+	// UseClusterIdentity is set to true if cluster identity is used in arc cluster
+	UseClusterIdentity bool
+	AADClientID        string
 }
 
 // NewConfig returns new auth config
-func NewConfig(usePodIdentity, useVMManagedIdentity bool, userAssignedIdentityID string, secrets map[string]string) (Config, error) {
+func NewConfig(usePodIdentity, useVMManagedIdentity, useClusterIdentity bool, userAssignedIdentityID string, secrets map[string]string) (Config, error) {
 	config := Config{}
 	// aad-pod-identity and user assigned managed identity modes are currently mutually exclusive
 	if usePodIdentity && useVMManagedIdentity {
 		return config, fmt.Errorf("cannot enable both pod identity and user-assigned managed identity")
 	}
-	if !usePodIdentity && !useVMManagedIdentity {
+	if !usePodIdentity && !useVMManagedIdentity && !useClusterIdentity {
 		var err error
 		if config.AADClientID, config.AADClientSecret, err = getCredential(secrets); err != nil {
 			return config, err
@@ -59,11 +62,12 @@ func NewConfig(usePodIdentity, useVMManagedIdentity bool, userAssignedIdentityID
 	config.UsePodIdentity = usePodIdentity
 	config.UseVMManagedIdentity = useVMManagedIdentity
 	config.UserAssignedIdentityID = userAssignedIdentityID
+	config.UseClusterIdentity = useClusterIdentity
 
 	return config, nil
 }
 
-func (c Config) GetServicePrincipalToken(podName, podNamespace, resource, aadEndpoint, tenantID, nmiPort string) (*adal.ServicePrincipalToken, error) {
+func (c Config) GetServicePrincipalToken(podName, podNamespace, resource, aadEndpoint, tenantID, nmiPort string) (adal.OAuthTokenProvider, error) {
 	oauthConfig, err := adal.NewOAuthConfig(aadEndpoint, tenantID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create OAuth config: %v", err)
@@ -141,6 +145,18 @@ func (c Config) GetServicePrincipalToken(podName, podNamespace, resource, aadEnd
 			resource)
 	}
 
+	if c.UseClusterIdentity {
+		t, err := getArcPolicyExtensionIdentityToken(resource)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get cluster identity token: %v", err)
+		}
+		return &adal.Token{
+			AccessToken: t,
+			Resource:    resource,
+			Type:        "Bearer",
+		}, nil
+	}
+
 	// for Service Principal access mode, clientID + client secret are used to retrieve token for resource
 	if len(c.AADClientSecret) > 0 && len(c.AADClientID) > 0 {
 		klog.InfoS("using service principal to retrieve access token", "clientID", utils.RedactClientID(c.AADClientID), "secret", utils.RedactClientID(c.AADClientSecret), "pod", klog.ObjectRef{Namespace: podNamespace, Name: podName})
@@ -177,3 +193,40 @@ func getCredential(secrets map[string]string) (string, string, error) {
 	}
 	return clientID, clientSecret, nil
 }
+
+func getArcPolicyExtensionIdentityToken(resource string) (string, error) {
+	extensionTokenProviderClient := tokenUtils.ExtensionTokenProvider(
+		resource,
+		"secrets-store-csi-driver",
+		"default",
+		&LoggerClient{})
+
+	accessToken, err := extensionTokenProviderClient.GetToken()
+
+	if err != nil {
+		return "", fmt.Errorf("Failed to get token from CRD: %v", err)
+	}
+
+	return accessToken.Token, nil
+}
+
+// Interface expected by Arc ClusterConfiguration Utils
+type TokenLoggerHelperAPI interface {
+	Info(msg string, keyValuePairs ...interface{})
+	Error(msg string, keyValuePairs ...interface{})
+	LogSecureString(format string, params ...interface{})
+}
+
+type LoggerClient struct {
+}
+
+func (client *LoggerClient) Info(msg string, keyValuePairs ...interface{}) {
+	klog.Info(msg, keyValuePairs)
+}
+
+func (client *LoggerClient) Error(msg string, keyValuePairs ...interface{}) {
+	klog.Error(msg, fmt.Errorf("Arc Policy extension Managed Identity token Error"), keyValuePairs)
+}
+
+//  Not in code path
+func (client *LoggerClient) LogSecureString(format string, params ...interface{}) {}
