@@ -91,6 +91,54 @@ func ReleaseExists() bool {
 	return err == nil
 }
 
+// InstallReleaseInput is the input for installing chart release
+type InstallReleaseInput struct {
+	Config *framework.Config
+}
+
+// InstallRelease installs csi-secrets-store-provider-azure release chart via Helm 3
+func InstallRelease(input InstallReleaseInput) {
+	// add csi-secrets-store-provider-azure chart repo
+	args := append([]string{
+		"repo", "add", "csi-secrets-store-provider-azure", "https://raw.githubusercontent.com/Azure/secrets-store-csi-driver-provider-azure/master/charts",
+	})
+	err := helm(args)
+	Expect(err).To(BeNil())
+
+	// update helm repo
+	args = append([]string{
+		"repo", "update",
+	})
+	err = helm(args)
+	Expect(err).To(BeNil())
+
+	// Install csi-secrets-store-provider-azure helm chart
+	args = append([]string{
+		"install",
+		chartName,
+		"csi-secrets-store-provider-azure/csi-secrets-store-provider-azure",
+		fmt.Sprintf("--version=%s", input.Config.BaseRelease),
+		fmt.Sprintf("--namespace=%s", framework.NamespaceKubeSystem),
+		fmt.Sprintf("--set=secrets-store-csi-driver.enableSecretRotation=true"),
+		fmt.Sprintf("--set=secrets-store-csi-driver.rotationPollInterval=30s"),
+		fmt.Sprintf("--set=logVerbosity=1"),
+		fmt.Sprintf("--set=linux.customUserAgent=csi-e2e"),
+		fmt.Sprintf("--set=windows.customUserAgent=csi-e2e"),
+		"--dependency-update",
+		"--wait",
+		"--timeout=5m",
+		"--debug",
+	})
+	if input.Config.IsWindowsTest {
+		args = append(args,
+			fmt.Sprintf("--set=windows.enabled=true"),
+			fmt.Sprintf("--set=secrets-store-csi-driver.windows.enabled=true"))
+	}
+
+	err = helm(args)
+	Expect(err).To(BeNil())
+}
+
 func generateValueArgs(config *framework.Config) []string {
 	args := []string{
 		fmt.Sprintf("--set=image.repository=%s/%s", config.Registry, config.ImageName),
