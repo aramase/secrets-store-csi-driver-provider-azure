@@ -10,7 +10,7 @@ require (
 	github.com/Azure/secrets-store-csi-driver-provider-azure v1.0.0
 	github.com/ghodss/yaml v1.0.0
 	github.com/kelseyhightower/envconfig v1.4.0
-	github.com/onsi/ginkgo v1.16.4
+	github.com/onsi/ginkgo v1.16.5
 	github.com/onsi/gomega v1.15.0
 	k8s.io/api v0.22.3
 	k8s.io/apiextensions-apiserver v0.22.3
