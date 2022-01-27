@@ -11,6 +11,17 @@ updates:
         update-types:
         - "version-update:semver-major"
         - "version-update:semver-minor"
+  - package-ecosystem: "gomod"
+    directory: "/test/e2e"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "security"
+    ignore:
+      - dependency-name: "*"
+        update-types:
+        - "version-update:semver-major"
+        - "version-update:semver-minor"
   - package-ecosystem: "npm"
     directory: "/website"
     schedule:
