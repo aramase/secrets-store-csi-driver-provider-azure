@@ -16,6 +16,19 @@ jobs:
         uses: actions/checkout@ec3a7ce113134d7a93b817d10a8272cb61118579
         with:
           fetch-depth: 0
+      - id: get-previous-release-tag
+        name: Get previous release tag
+        run: |
+          RELEASE_TAG=${GITHUB_REF/refs\/tags\//}
+
+          # if this is a stable release, we want to compare with the last available stable release
+          # to generate the entire changelog
+          if [[ ! "$RELEASE_TAG" =~ -rc. ]]; then
+            EXTRA_ARGS='--exclude "v[0-9]*-rc.[0-9]*"'
+          fi
+
+          echo "::set-output name=previous_release_tag::$(git describe --tags --match "v[0-9]*" --exclude "$RELEASE_TAG" --abbrev=0 ${EXTRA_ARGS:-})"
+
       # pinning to the sha 79d4afbba1b4eff8b9a98e3d2e58c4dbaf094e2b from https://github.com/goreleaser/goreleaser-action/releases/tag/v2.8.1
       - name: Goreleaser
         uses: goreleaser/goreleaser-action@c127c9be6187cfff52edfac7c51b1834a47995d7
@@ -24,3 +37,4 @@ jobs:
           args: release --rm-dist --timeout 60m --debug
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GORELEASER_PREVIOUS_TAG: ${{ steps.get-previous-release-tag.outputs.previous_release_tag }}
