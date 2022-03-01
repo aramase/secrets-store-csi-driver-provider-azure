@@ -20,6 +20,7 @@ jobs:
         name: Get previous release tag
         run: |
           RELEASE_TAG=${GITHUB_REF/refs\/tags\//}
+          echo "RELEASE_TAG=$RELEASE_TAG"
 
           # if this is a stable release, we want to compare with the last available stable release
           # to generate the entire changelog
@@ -27,6 +28,8 @@ jobs:
             EXTRA_ARGS='--exclude "v[0-9]*-rc.[0-9]*"'
           fi
 
+          echo "EXTRA_ARGS: $EXTRA_ARGS"
+          echo "OUTPUT: $(git describe --tags --match "v[0-9]*" --exclude "$RELEASE_TAG" --abbrev=0 ${EXTRA_ARGS:-})"
           echo "::set-output name=previous_release_tag::$(git describe --tags --match "v[0-9]*" --exclude "$RELEASE_TAG" --abbrev=0 ${EXTRA_ARGS:-})"
 
       # pinning to the sha 79d4afbba1b4eff8b9a98e3d2e58c4dbaf094e2b from https://github.com/goreleaser/goreleaser-action/releases/tag/v2.8.1
