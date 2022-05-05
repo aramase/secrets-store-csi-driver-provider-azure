@@ -142,7 +142,9 @@ func getAuthorizerForWorkloadIdentity(ctx context.Context, clientID, signedAsser
 		return nil, fmt.Errorf("failed to create confidential creds: %w", err)
 	}
 	confidentialClientApp, err := confidential.New(clientID, cred,
-		confidential.WithAuthority(fmt.Sprintf("%s%s/oauth2/token", aadEndpoint, tenantID)))
+		confidential.WithAuthority(fmt.Sprintf("%s%s/oauth2/token", aadEndpoint, tenantID)),
+		// TODO(aramase): move this behind a feature flag
+		confidential.WithAzureRegion(confidential.AutoDetectRegion()))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create confidential client app: %w", err)
 	}
