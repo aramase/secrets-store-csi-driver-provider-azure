@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -16,117 +15,85 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestNewConfig(t *testing.T) {
+func TestValidate(t *testing.T) {
 	cases := []struct {
-		desc                     string
-		usePodIdentity           bool
-		useVMManagedIdentity     bool
-		userAssignedIdentityID   string
-		workloadIdentityClientID string
-		workloadIdentityToken    string
-		secrets                  map[string]string
-		expectedConfig           Config
-		expectedErr              bool
+		desc   string
+		config *Config
 	}{
 		{
-			desc:                 "pod identity and vm managed identity enabled",
-			usePodIdentity:       true,
-			useVMManagedIdentity: true,
-			expectedErr:          true,
-			expectedConfig:       Config{},
-		},
-		{
-			desc:                 "secrets nil for service principal mode",
-			usePodIdentity:       false,
-			useVMManagedIdentity: false,
-			expectedErr:          true,
-			expectedConfig:       Config{},
-		},
-		{
-			desc:                 "returns the correct auth config",
-			usePodIdentity:       false,
-			useVMManagedIdentity: false,
-			expectedErr:          false,
-			secrets:              map[string]string{"clientid": "testclientid", "clientsecret": "testclientsecret"},
-			expectedConfig: Config{
-				UsePodIdentity:         false,
-				UseVMManagedIdentity:   false,
-				UserAssignedIdentityID: "",
-				AADClientID:            "testclientid",
-				AADClientSecret:        "testclientsecret",
+			desc: "using pod identity",
+			config: &Config{
+				UsePodIdentity: true,
 			},
 		},
 		{
-			desc:                     "returns the correct auth config with workload identity",
-			usePodIdentity:           false,
-			useVMManagedIdentity:     false,
-			workloadIdentityClientID: "testworkloadclientid",
-			workloadIdentityToken:    "testworkloadtoken",
-			expectedErr:              false,
-			secrets:                  map[string]string{},
-			expectedConfig: Config{
-				UsePodIdentity:           false,
-				UseVMManagedIdentity:     false,
-				UserAssignedIdentityID:   "",
-				AADClientID:              "",
-				AADClientSecret:          "",
-				WorkloadIdentityClientID: "testworkloadclientid",
-				WorkloadIdentityToken:    "testworkloadtoken",
+			desc: "using system-assigned identity",
+			config: &Config{
+				UseVMManagedIdentity: true,
+			},
+		},
+		{
+			desc: "using user-assigned identity",
+			config: &Config{
+				UseVMManagedIdentity:   true,
+				UserAssignedIdentityID: "test-id",
+			},
+		},
+		{
+			desc: "using workload identity",
+			config: &Config{
+				WorkloadIdentityClientID: "client-id",
+				WorkloadIdentityToken:    "token",
+			},
+		},
+		{
+			desc: "using service principal",
+			config: &Config{
+				ServicePrincipalCreds: map[string]string{"clientid": "testclientid", "clientsecret": "testclientsecret"},
 			},
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.desc, func(t *testing.T) {
-			config, err := NewConfig(tc.usePodIdentity, tc.useVMManagedIdentity, tc.userAssignedIdentityID, tc.workloadIdentityClientID, tc.workloadIdentityToken, tc.secrets)
-			if tc.expectedErr && err == nil || !tc.expectedErr && err != nil {
-				t.Fatalf("expected error: %v, got error: %v", tc.expectedErr, err)
-			}
-			if !reflect.DeepEqual(config, tc.expectedConfig) {
-				t.Fatalf("expected config: %+v, got: %+v", tc.expectedConfig, config)
+			if err := tc.config.Validate(); err != nil {
+				t.Fatalf("Validate() = %v, want nil", err)
 			}
 		})
 	}
 }
 
-func TestGetCredential(t *testing.T) {
+func TestValidateError(t *testing.T) {
 	cases := []struct {
-		desc                 string
-		secrets              map[string]string
-		expectedClientID     string
-		expectedClientSecret string
-		expectedErr          bool
+		desc   string
+		config *Config
 	}{
 		{
-			desc:        "client secret missing for service principal mode",
-			secrets:     map[string]string{"clientid": "testclientid"},
-			expectedErr: true,
+			desc: "pod identity and vm managed identity enabled",
+			config: &Config{
+				UsePodIdentity:       true,
+				UseVMManagedIdentity: true,
+			},
 		},
 		{
-			desc:        "client ID missing for service principal mode",
-			secrets:     map[string]string{"clientsecret": "testclientsecret"},
-			expectedErr: true,
+			desc: "service principal client id is empty",
+			config: &Config{
+				ServicePrincipalCreds: map[string]string{"clientid": "", "clientsecret": "testclientsecret"},
+			},
 		},
 		{
-			desc:                 "returns correct client id and client secret",
-			secrets:              map[string]string{"clientid": "testclientid", "clientsecret": "testclientsecret"},
-			expectedClientID:     "testclientid",
-			expectedClientSecret: "testclientsecret",
-			expectedErr:          false,
+			desc: "service principal client secret is empty",
+			config: &Config{
+				ServicePrincipalCreds: map[string]string{"clientid": "testclientid", "clientsecret": ""},
+			},
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.desc, func(t *testing.T) {
-			clientID, clientSecret, err := getCredential(tc.secrets)
-			if tc.expectedErr && err == nil || !tc.expectedErr && err != nil {
-				t.Fatalf("expected error: %v, got error: %v", tc.expectedErr, err)
-			}
-			if clientID != tc.expectedClientID {
-				t.Fatalf("expected clientID: %v, got: %v", tc.expectedClientID, clientID)
-			}
-			if clientSecret != tc.expectedClientSecret {
-				t.Fatalf("expected client secret: %v, got: %v", tc.expectedClientSecret, clientSecret)
+			err := tc.config.Validate()
+			if err == nil {
+				t.Fatalf("Validate() = nil, want error")
 			}
 		})
 	}
@@ -303,5 +270,65 @@ func TestParseServiceAccountToken(t *testing.T) {
 	}
 	if token != expectedToken {
 		t.Errorf("ParseServiceAccountToken(%s) = %s, want %s", saTokens, token, expectedToken)
+	}
+}
+
+func TestGetServicePrincipalClientID(t *testing.T) {
+	cases := []struct {
+		desc     string
+		secrets  map[string]string
+		expected string
+	}{
+		{
+			desc:     "empty",
+			secrets:  map[string]string{},
+			expected: "",
+		},
+		{
+			desc: "not empty",
+			secrets: map[string]string{
+				"clientid": "client-id",
+			},
+			expected: "client-id",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.desc, func(t *testing.T) {
+			actual := GetServicePrincipalClientID(tc.secrets)
+			if actual != tc.expected {
+				t.Errorf("GetServicePrincipalClientID(%v) = %v, want %v", tc.secrets, actual, tc.expected)
+			}
+		})
+	}
+}
+
+func TestGetServicePrincipalClientSecret(t *testing.T) {
+	cases := []struct {
+		desc     string
+		secrets  map[string]string
+		expected string
+	}{
+		{
+			desc:     "empty",
+			secrets:  map[string]string{},
+			expected: "",
+		},
+		{
+			desc: "not empty",
+			secrets: map[string]string{
+				"clientsecret": "client-secret",
+			},
+			expected: "client-secret",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.desc, func(t *testing.T) {
+			actual := GetServicePrincipalClientSecret(tc.secrets)
+			if actual != tc.expected {
+				t.Errorf("GetServicePrincipalClientSecret(%v) = %v, want %v", tc.secrets, actual, tc.expected)
+			}
+		})
 	}
 }

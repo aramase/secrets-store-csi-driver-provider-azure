@@ -65,10 +65,9 @@ type Config struct {
 	UseVMManagedIdentity bool
 	// UserAssignedIdentityID is the user-assigned managed identity clientID
 	UserAssignedIdentityID string
-	// AADClientSecret is the client secret for SP access mode
-	AADClientSecret string
-	// AADClientID is the clientID for SP access mode
-	AADClientID string
+	// ServicePrincipalCreds is a map that contains the clientID and clientSecret for
+	// service principal access mode
+	ServicePrincipalCreds map[string]string
 	// WorkloadIdentityClientID is the clientID for workload identity
 	// this clientID can be an Azure AD Application or a Managed identity
 	// NOTE: workload identity federation with managed identity is currently not supported
@@ -77,6 +76,10 @@ type Config struct {
 	// this token will be exchanged for an Azure AD Token based on the federated identity credential
 	// this service account token is associated with the workload requesting the volume mount
 	WorkloadIdentityToken string
+	// UseRegionalAADEndpoint is set to true if regional AAD endpoint (ESTS-R) is to be used
+	// with workload identity. The regional endpoint is only supported for workloads running in
+	// Azure VM. If set to true in non-Azure VM workloads, the token request will fail.
+	UseRegionalAADEndpoint bool
 }
 
 // SATokens represents the service account tokens sent as part of the MountRequest
@@ -87,64 +90,65 @@ type SATokens struct {
 	} `json:"api://AzureADTokenExchange"`
 }
 
-// NewConfig returns new auth config
-func NewConfig(
-	usePodIdentity,
-	useVMManagedIdentity bool,
-	userAssignedIdentityID,
-	workloadIdentityClientID,
-	workloadIdentityToken string,
-	secrets map[string]string) (Config, error) {
-	config := Config{}
-	// aad-pod-identity and user assigned managed identity modes are currently mutually exclusive
-	if usePodIdentity && useVMManagedIdentity {
-		return config, fmt.Errorf("cannot enable both pod identity and user-assigned managed identity")
-	}
-	useWorkloadIdentity := len(workloadIdentityClientID) > 0 && len(workloadIdentityToken) > 0
+// Validate validates the auth config
+func (c *Config) Validate() error {
+	// TODO(aramase) keeping the validation logic as-is today but should consider erroring out if
+	// more than 1 access mode is specified
 
-	if !usePodIdentity && !useVMManagedIdentity && !useWorkloadIdentity {
-		var err error
-		if config.AADClientID, config.AADClientSecret, err = getCredential(secrets); err != nil {
-			return config, err
+	// aad-pod-identity and user assigned managed identity modes are mutually exclusive
+	if c.UsePodIdentity && c.UseVMManagedIdentity {
+		return fmt.Errorf("cannot enable both pod identity and user-assigned managed identity")
+	}
+	useWorkloadIdentity := len(c.WorkloadIdentityClientID) > 0 && len(c.WorkloadIdentityToken) > 0
+	if !c.UsePodIdentity && !c.UseVMManagedIdentity && !useWorkloadIdentity {
+		// default is service principal
+		if GetServicePrincipalClientID(c.ServicePrincipalCreds) == "" {
+			return fmt.Errorf("service principal client id not set in nodePublishSecret 'clientid'")
+		}
+		if GetServicePrincipalClientSecret(c.ServicePrincipalCreds) == "" {
+			return fmt.Errorf("service principal client secret not set in nodePublishSecret 'clientsecret'")
 		}
 	}
-
-	config.UsePodIdentity = usePodIdentity
-	config.UseVMManagedIdentity = useVMManagedIdentity
-	config.UserAssignedIdentityID = userAssignedIdentityID
-	config.WorkloadIdentityClientID = workloadIdentityClientID
-	config.WorkloadIdentityToken = workloadIdentityToken
-
-	return config, nil
+	return nil
 }
 
 // GetAuthorizer returns an Azure authorizer based on the provided azure identity
-func (c Config) GetAuthorizer(ctx context.Context, podName, podNamespace, resource, aadEndpoint, tenantID, nmiPort string) (autorest.Authorizer, error) {
+func (c *Config) GetAuthorizer(ctx context.Context, podName, podNamespace, resource, aadEndpoint, tenantID, nmiPort string) (autorest.Authorizer, error) {
 	if c.UsePodIdentity {
 		return getAuthorizerForPodIdentity(podName, podNamespace, resource, aadEndpoint, tenantID, nmiPort)
 	}
+
 	if c.UseVMManagedIdentity {
 		return getAuthorizerForManagedIdentity(resource, c.UserAssignedIdentityID)
 	}
-	if len(c.AADClientSecret) > 0 && len(c.AADClientID) > 0 {
-		return getAuthorizerForServicePrincipal(c.AADClientID, c.AADClientSecret, resource, aadEndpoint, tenantID)
+
+	servicePrincipalClientID := GetServicePrincipalClientID(c.ServicePrincipalCreds)
+	servicePrincipalClientSecret := GetServicePrincipalClientSecret(c.ServicePrincipalCreds)
+	if len(servicePrincipalClientID) > 0 && len(servicePrincipalClientSecret) > 0 {
+		return getAuthorizerForServicePrincipal(servicePrincipalClientID, servicePrincipalClientSecret, resource, aadEndpoint, tenantID)
 	}
+
 	if len(c.WorkloadIdentityToken) > 0 && len(c.WorkloadIdentityClientID) > 0 {
-		return getAuthorizerForWorkloadIdentity(ctx, c.WorkloadIdentityClientID, c.WorkloadIdentityToken, resource, aadEndpoint, tenantID)
+		return getAuthorizerForWorkloadIdentity(ctx, c.WorkloadIdentityClientID, c.WorkloadIdentityToken, resource, aadEndpoint, tenantID, c.UseRegionalAADEndpoint)
 	}
 
 	return nil, fmt.Errorf("no valid identity access mode specified")
 }
 
-func getAuthorizerForWorkloadIdentity(ctx context.Context, clientID, signedAssertion, resource, aadEndpoint, tenantID string) (autorest.Authorizer, error) {
+func getAuthorizerForWorkloadIdentity(ctx context.Context, clientID, signedAssertion, resource, aadEndpoint, tenantID string, useRegionalAADEndpoint bool) (autorest.Authorizer, error) {
 	cred, err := confidential.NewCredFromAssertion(signedAssertion)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create confidential creds: %w", err)
 	}
-	confidentialClientApp, err := confidential.New(clientID, cred,
+
+	clientOptions := []confidential.Option{
 		confidential.WithAuthority(fmt.Sprintf("%s%s/oauth2/token", aadEndpoint, tenantID)),
-		// TODO(aramase): move this behind a feature flag
-		confidential.WithAzureRegion(confidential.AutoDetectRegion()))
+	}
+	if useRegionalAADEndpoint {
+		clientOptions = append(clientOptions, confidential.WithAzureRegion(confidential.AutoDetectRegion()))
+	}
+
+	confidentialClientApp, err := confidential.New(clientID, cred, clientOptions...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create confidential client app: %w", err)
 	}
@@ -262,31 +266,6 @@ func getAuthorizerForPodIdentity(podName, podNamespace, resource, aadEndpoint, t
 	return autorest.NewBearerAuthorizer(spt), nil
 }
 
-// getCredential gets clientid and clientsecret from the secrets
-func getCredential(secrets map[string]string) (string, string, error) {
-	if secrets == nil {
-		return "", "", fmt.Errorf("failed to get credentials, nodePublishSecretRef secret is not set")
-	}
-
-	var clientID, clientSecret string
-	for k, v := range secrets {
-		switch strings.ToLower(k) {
-		case "clientid":
-			clientID = v
-		case "clientsecret":
-			clientSecret = v
-		}
-	}
-
-	if clientID == "" {
-		return "", "", fmt.Errorf("could not find clientid in secrets(%v)", secrets)
-	}
-	if clientSecret == "" {
-		return "", "", fmt.Errorf("could not find clientsecret in secrets(%v)", secrets)
-	}
-	return clientID, clientSecret, nil
-}
-
 // Vendored from https://github.com/Azure/go-autorest/blob/def88ef859fb980eff240c755a70597bc9b490d0/autorest/adal/token.go
 // converts expires_on to the number of seconds
 func parseExpiresOn(s string) (json.Number, error) {
@@ -334,4 +313,14 @@ func ParseServiceAccountToken(saTokens string) (string, error) {
 		return "", fmt.Errorf("token for audience %s not found", DefaultTokenAudience)
 	}
 	return tokens.APIAzureADTokenExchange.Token, nil
+}
+
+// GetServicePrincipalClientID gets the client id for the service principal
+func GetServicePrincipalClientID(secrets map[string]string) string {
+	return secrets["clientid"]
+}
+
+// GetServicePrincipalClientSecret gets the client secret for the service principal
+func GetServicePrincipalClientSecret(secrets map[string]string) string {
+	return secrets["clientsecret"]
 }

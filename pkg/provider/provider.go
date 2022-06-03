@@ -40,7 +40,8 @@ var (
 
 // Provider implements the secrets-store-csi-driver provider interface
 type Provider struct {
-	reporter metrics.StatsReporter
+	reporter               metrics.StatsReporter
+	useRegionalAADEndpoint bool
 }
 
 // mountConfig holds the information for the mount event
@@ -50,7 +51,7 @@ type mountConfig struct {
 	// the type of azure cloud based on azure go sdk
 	azureCloudEnvironment *azure.Environment
 	// authConfig is the config parameters for accessing Key Vault
-	authConfig auth.Config
+	authConfig *auth.Config
 	// tenantID in AAD
 	tenantID string
 	// podName is the pod name
@@ -60,9 +61,10 @@ type mountConfig struct {
 }
 
 // NewProvider creates a new provider
-func NewProvider() *Provider {
+func NewProvider(useRegionalAADEndpoint bool) *Provider {
 	return &Provider{
-		reporter: metrics.NewStatsReporter(),
+		reporter:               metrics.NewStatsReporter(),
+		useRegionalAADEndpoint: useRegionalAADEndpoint,
 	}
 }
 
@@ -118,6 +120,8 @@ func (mc *mountConfig) GetAuthorizer(ctx context.Context, resource string) (auto
 // GetSecretsStoreObjectContent gets the objects (secret, key, certificate) from keyvault and returns the content
 // to the CSI driver. The driver will write the content to the file system.
 func (p *Provider) GetSecretsStoreObjectContent(ctx context.Context, attrib, secrets map[string]string, targetPath string, defaultFilePermission os.FileMode) ([]types.SecretFile, error) {
+	var err error
+
 	keyvaultName := types.GetKeyVaultName(attrib)
 	cloudName := types.GetCloudName(attrib)
 	userAssignedIdentityID := types.GetUserAssignedIdentityID(attrib)
@@ -126,19 +130,7 @@ func (p *Provider) GetSecretsStoreObjectContent(ctx context.Context, attrib, sec
 	podName := types.GetPodName(attrib)
 	podNamespace := types.GetPodNamespace(attrib)
 
-	usePodIdentity, err := types.GetUsePodIdentity(attrib)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse usePodIdentity flag, error: %w", err)
-	}
-	useVMManagedIdentity, err := types.GetUseVMManagedIdentity(attrib)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse useVMManagedIdentity flag, error: %w", err)
-	}
-
-	// attributes for workload identity
-	workloadIdentityClientID := types.GetClientID(attrib)
-	saTokens := types.GetServiceAccountTokens(attrib)
-
+	// TODO(aramase): refactor this into a separate validate function
 	if keyvaultName == "" {
 		return nil, fmt.Errorf("keyvaultName is not set")
 	}
@@ -155,17 +147,31 @@ func (p *Provider) GetSecretsStoreObjectContent(ctx context.Context, attrib, sec
 		return nil, fmt.Errorf("cloudName %s is not valid, error: %w", cloudName, err)
 	}
 
+	// initialize auth config
+	authConfig := &auth.Config{
+		ServicePrincipalCreds:  secrets,
+		UserAssignedIdentityID: userAssignedIdentityID,
+		UseRegionalAADEndpoint: p.useRegionalAADEndpoint,
+	}
+
+	if authConfig.UsePodIdentity, err = types.GetUsePodIdentity(attrib); err != nil {
+		return nil, fmt.Errorf("failed to parse usePodIdentity flag, error: %w", err)
+	}
+	if authConfig.UseVMManagedIdentity, err = types.GetUseVMManagedIdentity(attrib); err != nil {
+		return nil, fmt.Errorf("failed to parse useVMManagedIdentity flag, error: %w", err)
+	}
+	// attributes for workload identity
+	authConfig.WorkloadIdentityClientID = types.GetClientID(attrib)
+
 	// parse bound service account tokens for workload identity only if the clientID is set
-	var workloadIdentityToken string
-	if workloadIdentityClientID != "" {
-		if workloadIdentityToken, err = auth.ParseServiceAccountToken(saTokens); err != nil {
+	if authConfig.WorkloadIdentityClientID != "" {
+		if authConfig.WorkloadIdentityToken, err = auth.ParseServiceAccountToken(types.GetServiceAccountTokens(attrib)); err != nil {
 			return nil, fmt.Errorf("failed to parse workload identity tokens, error: %w", err)
 		}
 	}
 
-	authConfig, err := auth.NewConfig(usePodIdentity, useVMManagedIdentity, userAssignedIdentityID, workloadIdentityClientID, workloadIdentityToken, secrets)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create auth config, error: %w", err)
+	if err := authConfig.Validate(); err != nil {
+		return nil, fmt.Errorf("failed to validate auth config, error: %w", err)
 	}
 
 	mc := &mountConfig{
