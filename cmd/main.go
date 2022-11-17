@@ -46,6 +46,8 @@ var (
 
 	metricsBackend = flag.String("metrics-backend", "Prometheus", "Backend used for metrics")
 	prometheusPort = flag.Int("prometheus-port", 8898, "Prometheus port for metrics backend")
+
+	useRegionalAADEndpoint = flag.Bool("use-regional-aad-endpoint", true, "Use regional AAD endpoint. Set to true only if running in Azure.")
 )
 
 func main() {
@@ -92,6 +94,9 @@ func main() {
 	if *provider.ConstructPEMChain {
 		klog.Infof("construct pem chain feature enabled")
 	}
+	if *useRegionalAADEndpoint {
+		klog.Infof("using regional AAD endpoint")
+	}
 	// Add csi-secrets-store user agent to adal requests
 	if err := adal.AddToUserAgent(version.GetUserAgent()); err != nil {
 		klog.ErrorS(err, "failed to add user agent to adal")
@@ -124,7 +129,7 @@ func main() {
 		grpc.UnaryInterceptor(utils.LogInterceptor()),
 	}
 	s := grpc.NewServer(opts...)
-	csiDriverProviderServer := server.New()
+	csiDriverProviderServer := server.New(*useRegionalAADEndpoint)
 	k8spb.RegisterCSIDriverProviderServer(s, csiDriverProviderServer)
 	// Register the health service.
 	grpc_health_v1.RegisterHealthServer(s, csiDriverProviderServer)

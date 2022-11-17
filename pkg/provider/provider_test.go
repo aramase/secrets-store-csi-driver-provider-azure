@@ -862,7 +862,7 @@ func TestInitializeKVClient(t *testing.T) {
 		azure.USGovernmentCloud,
 	}
 	for i := range testEnvs {
-		authConfig, err := auth.NewConfig(false, false, "", "", "", map[string]string{"clientid": "id", "clientsecret": "secret"})
+		authConfig, err := auth.NewConfig(false, false, false, "", "", "", map[string]string{"clientid": "id", "clientsecret": "secret"})
 		assert.NoError(t, err)
 
 		mc := &mountConfig{
@@ -1029,7 +1029,7 @@ func TestGetSecretsStoreObjectContent(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.desc, func(t *testing.T) {
-			p := NewProvider()
+			p := NewProvider(false)
 
 			tmpDir, err := os.MkdirTemp("", "ut")
 			assert.NoError(t, err)

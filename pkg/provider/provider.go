@@ -47,6 +47,8 @@ type Interface interface {
 
 type provider struct {
 	reporter metrics.StatsReporter
+
+	useRegionalAADEndpoint bool
 }
 
 // mountConfig holds the information for the mount event
@@ -66,9 +68,10 @@ type mountConfig struct {
 }
 
 // NewProvider creates a new provider
-func NewProvider() Interface {
+func NewProvider(useRegionalAADEndpoint bool) Interface {
 	return &provider{
-		reporter: metrics.NewStatsReporter(),
+		reporter:               metrics.NewStatsReporter(),
+		useRegionalAADEndpoint: useRegionalAADEndpoint,
 	}
 }
 
@@ -169,7 +172,7 @@ func (p *provider) GetSecretsStoreObjectContent(ctx context.Context, attrib, sec
 		}
 	}
 
-	authConfig, err := auth.NewConfig(usePodIdentity, useVMManagedIdentity, userAssignedIdentityID, workloadIdentityClientID, workloadIdentityToken, secrets)
+	authConfig, err := auth.NewConfig(usePodIdentity, useVMManagedIdentity, p.useRegionalAADEndpoint, userAssignedIdentityID, workloadIdentityClientID, workloadIdentityToken, secrets)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create auth config, error: %w", err)
 	}

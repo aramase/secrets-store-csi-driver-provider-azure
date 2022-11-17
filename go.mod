@@ -7,7 +7,7 @@ require (
 	github.com/Azure/go-autorest/autorest v0.11.28
 	github.com/Azure/go-autorest/autorest/adal v0.9.21
 	github.com/Azure/go-autorest/autorest/date v0.3.0
-	github.com/AzureAD/microsoft-authentication-library-for-go v0.6.0
+	github.com/AzureAD/microsoft-authentication-library-for-go v0.7.0
 	github.com/golang/mock v1.6.0
 	github.com/google/go-cmp v0.5.8
 	github.com/pkg/errors v0.9.1
