@@ -40,6 +40,13 @@ type Interface interface {
 	GetSecretsStoreObjectContent(ctx context.Context, attrib, secrets map[string]string, targetPath string, defaultFilePermission os.FileMode) ([]types.SecretFile, error)
 }
 
+// ExternalStore is the interface for external secret stores
+type ExternalStore interface {
+	GetSecret(ctx context.Context, secretName string) (string, error)
+	GetKey(ctx context.Context, keyName string) (string, error)
+	GetCertificate(ctx context.Context, certificateName string) (string, error)
+}
+
 type provider struct {
 	reporter metrics.StatsReporter
 
