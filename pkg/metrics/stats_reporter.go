@@ -20,12 +20,11 @@ var (
 	grpcMethodKey   = "grpc_method"
 	grpcCodeKey     = "grpc_code"
 	grpcMessageKey  = "grpc_message"
-	keyvaultRequest metric.Float64ValueRecorder
-	grpcRequest     metric.Float64ValueRecorder
 )
 
 type reporter struct {
-	meter metric.Meter
+	keyvaultRequest metric.Float64Histogram
+	grpcRequest     metric.Float64Histogram
 }
 
 // StatsReporter is the interface for reporting metrics
@@ -35,45 +34,46 @@ type StatsReporter interface {
 }
 
 // NewStatsReporter creates a new StatsReporter
-func NewStatsReporter() StatsReporter {
+func NewStatsReporter() (StatsReporter, error) {
+	var err error
+
+	r := &reporter{}
 	meter := global.Meter("csi-secrets-store-provider-azure")
 
-	keyvaultRequest = metric.Must(meter).NewFloat64ValueRecorder("keyvault_request", metric.WithDescription("Distribution of how long it took to get from keyvault"))
-	grpcRequest = metric.Must(meter).NewFloat64ValueRecorder("grpc_request", metric.WithDescription("Distribution of how long it took for the gRPC requests"))
-	return &reporter{meter: meter}
+	if r.keyvaultRequest, err = meter.Float64Histogram("keyvault_request", metric.WithDescription("Distribution of how long it took to get from keyvault")); err != nil {
+		return nil, err
+	}
+	if r.grpcRequest, err = meter.Float64Histogram("grpc_request", metric.WithDescription("Distribution of how long it took for the gRPC requests")); err != nil {
+		return nil, err
+	}
+	return r, nil
 }
 
 // ReportKeyvaultRequest reports the duration of the keyvault request
 // objectType and objectName are used to identify the object being accessed
 // err is used to identify the error if any
 func (r *reporter) ReportKeyvaultRequest(ctx context.Context, duration float64, objectType, objectName, err string) {
-	attributes := []attribute.KeyValue{
+	opt := metric.WithAttributes{
 		serviceNameAttr,
 		providerAttr,
 		osTypeAttr,
-		attribute.String(objectTypeKey, objectType),
-		attribute.String(objectNameKey, objectName),
-		attribute.String(errorKey, err),
+		attribute.Key(objectTypeKey).String(objectType),
+		attribute.Key(objectNameKey).String(objectName),
+		attribute.Key(errorKey).String(err),
 	}
-	r.meter.RecordBatch(ctx,
-		attributes,
-		keyvaultRequest.Measurement(duration),
-	)
+	r.keyvaultRequest.Record(ctx, duration, opt)
 }
 
 // ReportGRPCRequest reports the duration of the gRPC request
 // method and code are used to identify the gRPC request
 func (r *reporter) ReportGRPCRequest(ctx context.Context, duration float64, method, code, message string) {
-	attributes := []attribute.KeyValue{
+	opt := metric.WithAttributes{
 		serviceNameAttr,
 		providerAttr,
 		osTypeAttr,
-		attribute.String(grpcMethodKey, method),
-		attribute.String(grpcCodeKey, code),
-		attribute.String(grpcMessageKey, message),
+		attribute.Key(grpcMethodKey).String(method),
+		attribute.Key(grpcCodeKey).String(code),
+		attribute.Key(grpcMessageKey).String(message),
 	}
-	r.meter.RecordBatch(ctx,
-		attributes,
-		grpcRequest.Measurement(duration),
-	)
+	r.grpcRequest.Record(ctx, duration, opt)
 }

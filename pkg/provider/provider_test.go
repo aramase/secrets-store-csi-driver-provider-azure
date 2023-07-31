@@ -1004,7 +1004,7 @@ func TestGetSecretsStoreObjectContent(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.desc, func(t *testing.T) {
-			p := NewProvider(false, false)
+			p, _ := NewProvider(false, false)
 
 			_, err := p.GetSecretsStoreObjectContent(testContext(t), tc.parameters, tc.secrets, 0420)
 			if tc.expectedErr {

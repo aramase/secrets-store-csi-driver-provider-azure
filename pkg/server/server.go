@@ -24,10 +24,14 @@ type CSIDriverProviderServer struct {
 }
 
 // New returns an instance of CSIDriverProviderServer
-func New(constructPEMChain, writeCertAndKeyInSeparateFiles bool) *CSIDriverProviderServer {
-	return &CSIDriverProviderServer{
-		provider: provider.NewProvider(constructPEMChain, writeCertAndKeyInSeparateFiles),
+func New(constructPEMChain, writeCertAndKeyInSeparateFiles bool) (*CSIDriverProviderServer, error) {
+	p, err := provider.NewProvider(constructPEMChain, writeCertAndKeyInSeparateFiles)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create provider, error: %w", err)
 	}
+	return &CSIDriverProviderServer{
+		provider: p,
+	}, nil
 }
 
 // Mount executes the mount operation in the provider. The provider fetches the objects from Key Vault

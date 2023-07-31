@@ -67,12 +67,17 @@ type keyvaultObject struct {
 }
 
 // NewProvider creates a new provider
-func NewProvider(constructPEMChain, writeCertAndKeyInSeparateFiles bool) Interface {
+func NewProvider(constructPEMChain, writeCertAndKeyInSeparateFiles bool) (Interface, error) {
+	statsReporter, err := metrics.NewStatsReporter()
+	if err != nil {
+		return &provider{}, err
+	}
+
 	return &provider{
-		reporter:                       metrics.NewStatsReporter(),
+		reporter:                       statsReporter,
 		constructPEMChain:              constructPEMChain,
 		writeCertAndKeyInSeparateFiles: writeCertAndKeyInSeparateFiles,
-	}
+	}, nil
 }
 
 // parseAzureEnvironment returns azure environment by name
